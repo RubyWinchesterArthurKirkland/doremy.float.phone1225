@@ -42,7 +42,9 @@ export async function synthesizeSpeech(
     if (provider === "OpenAI") {
         return synthesizeOpenAI(text, voiceConfig);
     }
-
+    if (provider === "FishAudio") {
+        return synthesizeFishAudio(text, voiceConfig);
+    }
     return null;
 }
 
@@ -176,7 +178,41 @@ async function synthesizeOpenAI(text: string, config: VoiceApiConfig): Promise<B
     const blob = await response.blob();
     return new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
 }
+// ── Fish Audio TTS ──────────────────────────────────
 
+async function synthesizeFishAudio(text: string, config: VoiceApiConfig): Promise<Blob | null> {
+    if (!config.apiKey) throw new Error("Fish Audio API Key 未配置");
+
+    const baseUrl = (config.baseUrl || "https://api.fish.audio").replace(/\/$/, "").replace(/\/v1$/, "");
+    const body: Record<string, unknown> = {
+        text,
+        format: "mp3",
+        mp3_bitrate: 128,
+        latency: "normal",
+    };
+    if (config.defaultVoice) body.reference_id = config.defaultVoice;
+    if (typeof config.speechSpeed === "number" && Number.isFinite(config.speechSpeed)) {
+        body.prosody = { speed: Math.min(2, Math.max(0.5, config.speechSpeed)), volume: 0 };
+    }
+
+    const response = await fetchWithTimeout(`${baseUrl}/v1/tts`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "Content-Type": "application/json",
+            model: config.model || "s1",
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`Fish Audio TTS 请求失败 (${response.status}): ${errText}`);
+    }
+
+    const blob = await response.blob();
+    return new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
+}
 // ── iOS audio playback that coexists with speech recognition ──────────
 // On iOS Safari, playing TTS through an <audio> element keeps the system audio
 // session in "playback" mode, which steals the mic from webkitSpeechRecognition
